@@ -91,7 +91,7 @@ class GBNHost():
         self.expected_seq_number = 1                # The next SEQ number expected
         # The last ACK pkt sent.
         self.last_ACK_pkt = self.make_pkt(
-            self.current_seq_number, 0, True, 0)
+            0, 0, True, 0)
         # TODO: This should be initialized to an ACK response with an
         #       ACK number of 0. If a problem occurs with the first
         #       packet that is received, then this default ACK should
@@ -110,26 +110,21 @@ class GBNHost():
 
     def receive_from_application_layer(self, payload):
         sndpkt = bytearray
-        # arb_checksum = 1
         if self.current_seq_number < (self.last_ACKed + self.window_size):
             sndpkt = self.make_pkt(self.current_seq_number, 0, False, len(
                 payload), payload.encode(), None)
             checksum = self.checksum(sndpkt)
-            # print("This is the send pkt: ", sndpkt)
             sndpkt = self.make_pkt(self.current_seq_number, 0, False, len(
                 payload), payload.encode(), checksum)
-            self.simulator.to_layer3(self.entity, sndpkt, False)
             self.unACKed_buffer[self.current_seq_number] = sndpkt
-
+            self.simulator.to_layer3(
+                self.entity, self.unACKed_buffer[self.current_seq_number], False)
 
             if self.last_ACKed == self.current_seq_number:
-                print("last = curr")
                 self.simulator.start_timer(self.entity, self.timer_interval)
             self.current_seq_number += 1
         else:
             self.app_layer_buffer.append(sndpkt)
-        
-
 
     # This function implements the RECEIVING functionality. This function will be more complex than
     # receive_from_application_layer(), as it must process both packets containing new data, and packets
@@ -146,42 +141,45 @@ class GBNHost():
     # TODO: Implement this method
 
     def receive_from_network_layer(self, byte_data):
-
-       
-        if self.corrupted(byte_data):
-            print("This pkt is corrupt")
-            self.simulator.to_layer3(self.entity, self.last_ACK_pkt, True)
-        else:
-            
-            # print("Pkt is not corrupted: ")
+        try:
             header = unpack('!iiH?i', byte_data[0:15])
+            unpacked_pkt = unpack('!iiH?i%is' % header[4], byte_data)
+        except:
+            self.simulator.to_layer3(self.entity, self.last_ACK_pkt, True)
+            return
 
-            payload_length = header[4]
-            if payload_length > 0:
-                unpacked_pkt = unpack('!iiH?i%is' % payload_length, byte_data)
+        if self.corrupted(byte_data):
+            self.simulator.to_layer3(self.entity, self.last_ACK_pkt, True)
+        elif not header[3]:
+            if header[0] == self.expected_seq_number:
+                unpacked_pkt = unpack('!iiH?i%is' % header[4], byte_data)
                 self.simulator.to_layer5(self.entity, unpacked_pkt[5].decode())
-                print("Sent data: ", unpacked_pkt[5].decode())
-                ackpkt = self.make_pkt(self.expected_seq_number, self.current_seq_number, True, 0)
+                ackpkt = self.make_pkt(0, self.expected_seq_number, True, 0)
                 self.simulator.to_layer3(self.entity, ackpkt, True)
                 self.last_ACK_pkt = ackpkt
                 self.expected_seq_number += 1
             else:
-                print("ack has been received")
-                self.last_ACKed = header[1] + 1
-                if self.last_ACKed == self.current_seq_number:
-                    self.simulator.stop_timer(self.entity)
-                else:
-                    self.simulator.start_timer(self.entity, self.timer_interval)
-
+                self.simulator.to_layer3(self.entity, self.last_ACK_pkt, True)
+        else:
+            self.last_ACKed = header[1] + 1
+            if self.last_ACKed == self.current_seq_number:
+                self.simulator.stop_timer(self.entity)
+            else:
+                self.simulator.start_timer(self.entity, self.timer_interval)
 
     # This function is called by the simulator when a timer interrupt is triggered due to an ACK not being
     # received in the expected time frame. All unACKed data should be resent, and the timer restarted
-    # TODO: Implement this method
+    # TODO: Implement this method 
 
     def timer_interrupt(self):
+        send = False
         for x in self.unACKed_buffer.values():
             self.simulator.to_layer3(self.entity, x, False)
-        self.simulator.start_timer(self.entity, self.timer_interval)
+            send = True
+        if send:
+            self.simulator.start_timer(self.entity, self.timer_interval)
+
+
 
     def make_pkt(self, seq_num, ack, is_ack, payload_len, payload=None, checksum=None):
         sndpkt = bytearray
@@ -195,11 +193,10 @@ class GBNHost():
                           checksum, is_ack, payload_len, payload)
             return sndpkt
 
-        else:# ACK pkt with payload length set to 0 and empty payload
-            sndpkt = pack('!ii?i', seq_num, ack, is_ack, payload_len)
+        else:  # ACK pkt with payload length set to 0 and empty payload
+            sndpkt = pack('!ii?i', 0, ack, is_ack, payload_len)
             checksum = self.checksum(sndpkt)
-            sndpkt = pack('!iiH?i', seq_num, ack, checksum, is_ack, payload_len)
-            print("ACK pkt has been created")
+            sndpkt = pack('!iiH?i', 0, ack, checksum, is_ack, payload_len)
             return sndpkt
 
     def checksum(self, packet):
@@ -222,7 +219,6 @@ class GBNHost():
         return (c & 0xffff) + (c >> 16)
 
     def corrupted(self, sndpkt):
-        print("Checksum in corrupted = ", self.checksum(sndpkt))
         if self.checksum(sndpkt) == 0x0000:
             return False
         else:
