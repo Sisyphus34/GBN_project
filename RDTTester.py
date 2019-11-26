@@ -136,7 +136,7 @@ class RDTTester():
         if missing_from_actual:
             problems += "%s: Missing from %s: %s\n" % (entity, propertyname, ", ".join(missing_from_actual))
 
-        extra_in_actual = self.diff(actual_list, desired_list)
+        extra_in_actual = self.diff(desired_list, actual_list)
         if extra_in_actual:
             problems += "%s: Extra in %s: %s\n" % (entity, propertyname, ", ".join(extra_in_actual))
 
