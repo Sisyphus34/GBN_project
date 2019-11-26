@@ -120,7 +120,7 @@ class GBNHost():
             self.simulator.to_layer3(
                 self.entity, self.unACKed_buffer[self.current_seq_number], False)
 
-            if self.last_ACKed == self.current_seq_number:
+            if self.last_ACKed + 1 == self.current_seq_number:
                 self.simulator.start_timer(self.entity, self.timer_interval)
             self.current_seq_number += 1
         else:
@@ -141,14 +141,14 @@ class GBNHost():
     # TODO: Implement this method
 
     def receive_from_network_layer(self, byte_data):
+        header = unpack('!iiH?i', byte_data[0:15])
         try:
-            header = unpack('!iiH?i', byte_data[0:15])
             unpacked_pkt = unpack('!iiH?i%is' % header[4], byte_data)
         except:
             self.simulator.to_layer3(self.entity, self.last_ACK_pkt, True)
             return
 
-        if self.corrupted(byte_data):
+        if self.corrupted(byte_data) or byte_data is None:
             self.simulator.to_layer3(self.entity, self.last_ACK_pkt, True)
         elif not header[3]:
             if header[0] == self.expected_seq_number:
@@ -161,15 +161,23 @@ class GBNHost():
             else:
                 self.simulator.to_layer3(self.entity, self.last_ACK_pkt, True)
         else:
-            self.last_ACKed = header[1] + 1
-            if self.last_ACKed == self.current_seq_number:
-                self.simulator.stop_timer(self.entity)
-            else:
+            if self.last_ACKed < header[1]:
+                ack = self.last_ACKed + 1
+                while ack <= header[1] and ack in self.unACKed_buffer.keys():
+                    del self.unACKed_buffer[ack]
+                    ack += 1
+            self.last_ACKed = header[1] 
+            self.simulator.stop_timer(self.entity)
+            if self.last_ACKed + 1  != self.current_seq_number:
                 self.simulator.start_timer(self.entity, self.timer_interval)
+            # if self.last_ACKed == self.current_seq_number:
+            #     self.simulator.stop_timer(self.entity)
+            # else:
+            #     self.simulator.start_timer(self.entity, self.timer_interval)
 
     # This function is called by the simulator when a timer interrupt is triggered due to an ACK not being
     # received in the expected time frame. All unACKed data should be resent, and the timer restarted
-    # TODO: Implement this method 
+    # TODO: Implement this method
 
     def timer_interrupt(self):
         send = False
@@ -178,8 +186,6 @@ class GBNHost():
             send = True
         if send:
             self.simulator.start_timer(self.entity, self.timer_interval)
-
-
 
     def make_pkt(self, seq_num, ack, is_ack, payload_len, payload=None, checksum=None):
         sndpkt = bytearray
